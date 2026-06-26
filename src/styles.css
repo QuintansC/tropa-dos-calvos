@@ -96,8 +96,16 @@ a {
   justify-content: center;
   width: 40px;
   border-radius: 50%;
+  overflow: hidden;
   font-family: Georgia, "Times New Roman", serif;
   font-size: 0.9rem;
+}
+
+.brand-logo {
+  height: 100%;
+  width: 100%;
+  object-fit: cover;
+  border-radius: 50%;
 }
 
 .nav-links {
@@ -126,14 +134,23 @@ a {
   min-width: 0;
 }
 
-.user-menu span {
+.user-profile-link {
+  border-bottom: 2px solid transparent;
   color: var(--muted);
   font-size: 0.86rem;
   font-weight: 800;
   max-width: 220px;
   overflow: hidden;
+  padding: 7px 0;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.user-profile-link:hover,
+.user-profile-link:focus-visible,
+.user-profile-link.is-active {
+  border-color: var(--burgundy);
+  color: var(--ink);
 }
 
 .connection-banner {
@@ -314,7 +331,10 @@ textarea:focus-visible {
 }
 
 .panel .button-secondary,
-.member-panel .button-secondary {
+.member-panel .button-secondary,
+.book-card .button-secondary,
+.suggestion-item .button-secondary,
+.modal-panel .button-secondary {
   background: var(--surface);
   border-color: var(--line);
   color: var(--ink);
@@ -674,6 +694,239 @@ textarea {
   align-self: end;
 }
 
+.book-progress-box {
+  background: #fffdf8;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.book-progress-head,
+.progress-row-head {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.book-progress-head span,
+.book-progress-box small,
+.progress-row small {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.book-progress-head strong,
+.progress-row-head strong {
+  font-family: Georgia, "Times New Roman", serif;
+  line-height: 1.1;
+}
+
+.progress-track {
+  background: rgba(23, 19, 15, 0.08);
+  border-radius: 999px;
+  height: 8px;
+  overflow: hidden;
+}
+
+.progress-track span {
+  background: var(--green);
+  display: block;
+  height: 100%;
+}
+
+.book-progress-form {
+  align-items: end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.book-progress-form input {
+  min-height: 40px;
+  padding: 8px 10px;
+}
+
+.book-progress-form .button {
+  min-height: 40px;
+  padding: 8px 12px;
+}
+
+.book-card-edit {
+  align-content: start;
+}
+
+.book-card-compact {
+  align-content: start;
+  gap: 14px;
+}
+
+.book-card-compact .card-actions {
+  align-self: end;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.book-card-compact .card-actions .button {
+  font-size: 0.88rem;
+  min-height: 40px;
+  padding: 8px 12px;
+  width: 100%;
+}
+
+.book-card-compact .card-actions .button-primary {
+  grid-column: 1 / -1;
+}
+
+.book-card-top {
+  align-items: start;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.book-cover {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  height: 96px;
+  object-fit: cover;
+  width: 68px;
+}
+
+.book-cover-placeholder {
+  align-items: center;
+  background: rgba(35, 72, 58, 0.08);
+  color: var(--green-strong);
+  display: flex;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 2rem;
+  font-weight: 900;
+  justify-content: center;
+  text-transform: uppercase;
+}
+
+.book-progress-bar {
+  display: grid;
+  gap: 6px;
+}
+
+.book-progress-bar small {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.suggestion-main {
+  display: flex;
+  gap: 16px;
+}
+
+.suggestion-cover {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  flex: none;
+  height: 108px;
+  object-fit: cover;
+  width: 74px;
+}
+
+.modal-panel.progress-modal {
+  display: grid;
+  gap: 18px;
+  padding: clamp(18px, 4vw, 30px);
+  width: min(480px, 100%);
+}
+
+.progress-modal-form {
+  display: grid;
+  gap: 18px;
+}
+
+.link-button {
+  background: none;
+  border: none;
+  color: var(--green-strong);
+  cursor: pointer;
+  font-size: 0.84rem;
+  font-weight: 800;
+  justify-self: start;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.link-button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.modal-panel.reviews-modal,
+.modal-panel.discussion-modal {
+  display: grid;
+  gap: 18px;
+  padding: clamp(18px, 4vw, 30px);
+  width: min(620px, 100%);
+}
+
+.review-list,
+.thread-list {
+  display: grid;
+  gap: 12px;
+  max-height: 46vh;
+  overflow: auto;
+}
+
+.review-item,
+.thread-item {
+  background: #fffdf8;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+}
+
+.review-head,
+.thread-head {
+  align-items: baseline;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.review-head strong,
+.thread-head strong {
+  font-family: Georgia, "Times New Roman", serif;
+}
+
+.review-head span,
+.thread-head span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.review-item p,
+.thread-item p {
+  color: var(--ink);
+  margin: 0;
+}
+
+.review-note {
+  color: var(--muted);
+  font-weight: 800;
+  margin: 0;
+}
+
+.reviews-modal-form,
+.discussion-modal-form {
+  display: grid;
+  gap: 16px;
+}
+
 .tag {
   align-self: start;
   background: rgba(35, 72, 58, 0.1);
@@ -697,6 +950,18 @@ textarea {
   background: rgba(194, 147, 66, 0.12);
   border-color: rgba(194, 147, 66, 0.28);
   color: #6e4b14;
+}
+
+.tag-genre {
+  background: rgba(194, 147, 66, 0.12);
+  border-color: rgba(194, 147, 66, 0.28);
+  color: #6e4b14;
+}
+
+.tag-muted {
+  background: rgba(23, 19, 15, 0.06);
+  border-color: rgba(23, 19, 15, 0.14);
+  color: var(--muted);
 }
 
 .book-card h3,
@@ -1086,6 +1351,139 @@ textarea {
 
 .history-empty {
   color: var(--muted);
+}
+
+.draw-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.rail-card-hint {
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 700;
+  margin: -6px 0 0;
+}
+
+.participant-list {
+  display: grid;
+  gap: 8px;
+}
+
+.participant-row {
+  background: #fffdf8;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  display: grid;
+  gap: 4px;
+  padding: 10px 14px;
+}
+
+.participant-row-head {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  justify-content: space-between;
+}
+
+.participant-row-head strong {
+  font-family: Georgia, "Times New Roman", serif;
+}
+
+.participant-row-head span {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.participant-reading {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.participant-reading.is-done {
+  color: var(--green-strong);
+}
+
+.reading-history-list {
+  display: grid;
+  gap: 10px;
+}
+
+.reading-history-item {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.reading-history-item.is-open {
+  background: #fffdf8;
+}
+
+.reading-history-toggle {
+  align-items: center;
+  background: none;
+  border: none;
+  color: var(--ink);
+  cursor: pointer;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 14px 16px;
+  text-align: left;
+  width: 100%;
+}
+
+.reading-history-info {
+  display: grid;
+  gap: 4px;
+}
+
+.reading-history-info strong {
+  color: var(--ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.05rem;
+  line-height: 1.1;
+}
+
+.reading-history-info small {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.reading-history-chevron {
+  color: var(--green-strong);
+  font-size: 1.4rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.reading-history-item .participant-list {
+  padding: 0 16px 16px;
+}
+
+.reading-progress-list {
+  display: grid;
+  gap: 12px;
+}
+
+.progress-row {
+  background: #fffdf8;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.progress-row-head span {
+  color: var(--burgundy);
+  font-weight: 900;
 }
 
 .member-form {

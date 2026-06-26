@@ -5,17 +5,24 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import heroImage from "./assets/book-club-hero.png";
+import brandLogo from "./assets/file.jpg";
 import { signOutAction } from "./app/auth-actions.js";
 import {
+  createBookReviewAction,
   createReadingCheckinAction,
   createSuggestionAction,
+  createSuggestionCommentAction,
+  deleteBookReviewAction,
   deleteRecommendationAction,
   deleteSuggestionAction,
+  deleteSuggestionCommentAction,
   drawBookAction,
   joinReadingCycleAction,
   leaveReadingCycleAction,
   promoteSuggestionToRecommendationAction,
   toggleRecommendationReadAction,
+  updateBookProgressAction,
+  updateRecommendationAction,
   updateReadingCycleRulesAction,
   updateProfileAction,
   voteSuggestionAction
@@ -34,11 +41,11 @@ const emptyState = {
   leaderboard: [],
   checkins: [],
   activeParticipants: [],
+  activeReadingProgress: [],
   currentUserParticipates: false,
   setupError: ""
 };
 
-const moods = ["Debate forte", "Leitura leve", "Clássico", "Surpresa"];
 const weekDays = [
   "Segunda-feira",
   "Terça-feira",
@@ -53,8 +60,7 @@ const routes = [
   { href: "/", label: "Início" },
   { href: "/recomendacoes", label: "Acervo" },
   { href: "/sugestoes", label: "Sugestões" },
-  { href: "/sorteio", label: "Sorteio" },
-  { href: "/perfil", label: "Perfil" }
+  { href: "/sorteio", label: "Leituras" }
 ];
 
 export default function App({ initialState = emptyState, userEmail, page = "home" }) {
@@ -74,6 +80,7 @@ export default function App({ initialState = emptyState, userEmail, page = "home
 
   const recommendations = state.recommendations;
   const suggestions = state.suggestions;
+  const cycles = state.cycles;
   const history = state.history;
   const activeCycle = state.activeCycle;
   const profile = state.profile;
@@ -82,6 +89,7 @@ export default function App({ initialState = emptyState, userEmail, page = "home
   const leaderboard = state.leaderboard;
   const checkins = state.checkins;
   const activeParticipants = state.activeParticipants;
+  const activeReadingProgress = state.activeReadingProgress;
   const currentUserParticipates = state.currentUserParticipates;
   const setupError = state.setupError;
   const profileLabel = profile?.displayName || userEmail;
@@ -90,16 +98,25 @@ export default function App({ initialState = emptyState, userEmail, page = "home
     const query = bookSearch.trim().toLowerCase();
 
     return recommendations.filter((book) => {
-      const matchesMood = activeFilter === "all" || book.mood === activeFilter;
+      const genre = String(book.genre || "").trim();
+      const matchesGenre = activeFilter === "all" || genre === activeFilter;
       const matchesSearch =
         !query ||
-        [book.title, book.author, book.recommender, book.reason].some((value) =>
+        [book.title, book.author, book.recommender, book.genre, book.reason].some((value) =>
           String(value || "").toLowerCase().includes(query)
         );
 
-      return matchesMood && matchesSearch;
+      return matchesGenre && matchesSearch;
     });
   }, [activeFilter, bookSearch, recommendations]);
+
+  const recommendationGenres = useMemo(() => {
+    const genres = recommendations
+      .map((book) => String(book.genre || "").trim())
+      .filter(Boolean);
+
+    return [...new Set(genres)].sort((a, b) => a.localeCompare(b, "pt-BR"));
+  }, [recommendations]);
 
   const sortedSuggestions = useMemo(() => {
     return [...suggestions].sort((a, b) => b.votes - a.votes);
@@ -108,7 +125,13 @@ export default function App({ initialState = emptyState, userEmail, page = "home
   const latestDraw = history[0];
 
   useEffect(() => {
-    const availableBookIds = recommendations.filter((book) => !book.isRead).map((book) => book.id);
+    if (activeFilter !== "all" && !recommendationGenres.includes(activeFilter)) {
+      setActiveFilter("all");
+    }
+  }, [activeFilter, recommendationGenres]);
+
+  useEffect(() => {
+    const availableBookIds = recommendations.map((book) => book.id);
 
     setSelectedDrawBookIds((currentIds) => {
       const stillAvailableIds = currentIds.filter((id) => availableBookIds.includes(id));
@@ -161,9 +184,11 @@ export default function App({ initialState = emptyState, userEmail, page = "home
     activeFilter,
     activeCycle,
     activeParticipants,
+    activeReadingProgress,
     addCheckin,
     filteredRecommendations,
     checkins,
+    currentUserId: profile?.id || "",
     currentUserParticipates,
     isPending: isPending || Boolean(setupError),
     leaderboard,
@@ -171,6 +196,7 @@ export default function App({ initialState = emptyState, userEmail, page = "home
     profile,
     profiles,
     discordHandles,
+    recommendationGenres,
     bookSearch,
     recommendations,
     saveProfile,
@@ -180,6 +206,7 @@ export default function App({ initialState = emptyState, userEmail, page = "home
     setSelectedDrawBookIds,
     sortedSuggestions,
     suggestions,
+    cycles,
     history,
     addSuggestion,
     joinReadingCycle: () => runAction(() => joinReadingCycleAction(activeCycle?.id)),
@@ -192,7 +219,7 @@ export default function App({ initialState = emptyState, userEmail, page = "home
       <header className="site-header">
         <Link className="brand" href="/" aria-label="Ir para o início">
           <span className="brand-mark" aria-hidden="true">
-            TC
+            <Image className="brand-logo" src={brandLogo} alt="" width={40} height={40} />
           </span>
           <span>Tropa do Calvo</span>
         </Link>
@@ -210,7 +237,13 @@ export default function App({ initialState = emptyState, userEmail, page = "home
         </nav>
 
         <div className="user-menu">
-          <span>{profileLabel}</span>
+          <Link
+            className={`user-profile-link${pathname === "/perfil" ? " is-active" : ""}`}
+            href="/perfil"
+            aria-label="Abrir perfil"
+          >
+            {profileLabel}
+          </Link>
           <button
             className="button button-compact"
             type="button"
@@ -350,8 +383,10 @@ function SetupNotice({ message }) {
 function RecommendationsPage({
   activeFilter,
   bookSearch,
+  currentUserId,
   filteredRecommendations,
   isPending,
+  recommendationGenres,
   setActiveFilter,
   setBookSearch,
   recommendations,
@@ -383,7 +418,7 @@ function RecommendationsPage({
             <input
               value={bookSearch}
               type="search"
-              placeholder="Título, autor, indicação ou motivo"
+              placeholder="Título, autor, gênero, indicação ou motivo"
               onChange={(event) => setBookSearch(event.target.value)}
             />
           </label>
@@ -392,13 +427,13 @@ function RecommendationsPage({
           </Link>
         </div>
 
-        <div className="toolbar" aria-label="Filtros de recomendações">
+        <div className="toolbar" aria-label="Filtros de gêneros">
           <FilterButton active={activeFilter === "all"} onClick={() => setActiveFilter("all")}>
-            Todas
+            Todos
           </FilterButton>
-          {moods.map((mood) => (
-            <FilterButton key={mood} active={activeFilter === mood} onClick={() => setActiveFilter(mood)}>
-              {mood}
+          {recommendationGenres.map((genre) => (
+            <FilterButton key={genre} active={activeFilter === genre} onClick={() => setActiveFilter(genre)}>
+              {genre}
             </FilterButton>
           ))}
         </div>
@@ -409,9 +444,18 @@ function RecommendationsPage({
               <RecommendationCard
                 key={book.id}
                 book={book}
+                currentUserId={currentUserId}
                 disabled={isPending}
+                onEdit={(formData, onSuccess) =>
+                  runAction(() => updateRecommendationAction(formData), { onSuccess })
+                }
+                onProgress={(formData) => runAction(() => updateBookProgressAction(formData))}
                 onRemove={() => runAction(() => deleteRecommendationAction(book.id))}
                 onToggleRead={() => runAction(() => toggleRecommendationReadAction(book.id, !book.isRead))}
+                onAddReview={(formData, onSuccess) =>
+                  runAction(() => createBookReviewAction(formData), { onSuccess })
+                }
+                onDeleteReview={(reviewId) => runAction(() => deleteBookReviewAction(reviewId))}
               />
             ))
           ) : (
@@ -423,7 +467,14 @@ function RecommendationsPage({
   );
 }
 
-function SuggestionsPage({ isPending, sortedSuggestions, addSuggestion, runAction, discordHandles = [] }) {
+function SuggestionsPage({
+  currentUserId,
+  isPending,
+  sortedSuggestions,
+  addSuggestion,
+  runAction,
+  discordHandles = []
+}) {
   const hasDiscordHandles = discordHandles.length > 0;
 
   return (
@@ -457,12 +508,22 @@ function SuggestionsPage({ isPending, sortedSuggestions, addSuggestion, runActio
             </label>
             <Field label="Páginas" name="pages" type="number" min="1" max="2000" placeholder="320" />
           </div>
+          <div className="field-pair">
+            <Field label="Gênero" name="genre" placeholder="Fantasia, suspense, biografia..." required />
+            <Field
+              label="Link do Google Drive"
+              name="fileUrl"
+              type="url"
+              inputMode="url"
+              placeholder="https://drive.google.com/..."
+            />
+          </div>
           <Field
-            label="Link do Google Drive"
-            name="fileUrl"
+            label="Link da capa"
+            name="coverUrl"
             type="url"
             inputMode="url"
-            placeholder="https://drive.google.com/..."
+            placeholder="https://.../capa.jpg"
           />
           <Textarea label="Defesa da indicação" name="pitch" rows="4" required />
           <button className="button button-primary" type="submit" disabled={isPending || !hasDiscordHandles}>
@@ -478,10 +539,15 @@ function SuggestionsPage({ isPending, sortedSuggestions, addSuggestion, runActio
               <SuggestionItem
                 key={suggestion.id}
                 suggestion={suggestion}
+                currentUserId={currentUserId}
                 disabled={isPending}
                 onPromote={() => runAction(() => promoteSuggestionToRecommendationAction(suggestion.id))}
                 onVote={() => runAction(() => voteSuggestionAction(suggestion.id))}
                 onRemove={() => runAction(() => deleteSuggestionAction(suggestion.id))}
+                onAddComment={(formData, onSuccess) =>
+                  runAction(() => createSuggestionCommentAction(formData), { onSuccess })
+                }
+                onDeleteComment={(commentId) => runAction(() => deleteSuggestionCommentAction(commentId))}
               />
             ))
           ) : (
@@ -495,11 +561,10 @@ function SuggestionsPage({ isPending, sortedSuggestions, addSuggestion, runActio
 
 function DrawPage({
   activeCycle,
-  activeParticipants,
+  activeReadingProgress,
   currentUserParticipates,
+  cycles = [],
   isPending,
-  latestDraw,
-  history,
   joinReadingCycle,
   leaveReadingCycle,
   recommendations,
@@ -509,13 +574,16 @@ function DrawPage({
 }) {
   const [drawBookSearch, setDrawBookSearch] = useState("");
   const [isRoutineModalOpen, setIsRoutineModalOpen] = useState(false);
-  const availableBooks = recommendations.filter((book) => !book.isRead);
-  const readBooks = recommendations.filter((book) => book.isRead);
+  const activeCycleDetailed = cycles.find((cycle) => cycle.id === activeCycle?.id) || null;
+  const activeCycleParticipants = activeCycleDetailed?.participants ?? [];
+  const pastCycles = cycles.filter((cycle) => cycle.id !== activeCycle?.id);
+  const availableBooks = recommendations;
+  const readBooks = [];
   const drawQuery = drawBookSearch.trim().toLowerCase();
   const visibleAvailableBooks = availableBooks.filter((book) => {
     return (
       !drawQuery ||
-      [book.title, book.author, book.recommender, book.reason].some((value) =>
+      [book.title, book.author, book.genre, book.recommender, book.reason].some((value) =>
         String(value || "").toLowerCase().includes(drawQuery)
       )
     );
@@ -555,35 +623,47 @@ function DrawPage({
     <section className="draw-section page-section" aria-labelledby="draw-title">
       <div className="section-shell draw-layout">
         <SectionHeading
-          kicker="Sorteios"
-          title="Escolha o livro da próxima leitura"
-          copy="Monte a lista com os livros não lidos do acervo e gire o sorteio. Depois o grupo define data de início, encontros, metas e lembretes."
+          kicker="Leituras"
+          title="A leitura atual do grupo"
+          copy="Veja qual livro a tropa está lendo agora, entre na leitura quando quiser e acompanhe o histórico de quem participou de cada rodada."
           id="draw-title"
         />
 
         <div className="draw-hero" aria-live="polite">
           <div className="draw-hero-main">
-            <span className="draw-hero-kicker">Resultado do sorteio</span>
+            <span className="draw-hero-kicker">
+              {activeCycle ? "Lendo agora" : "Nenhuma leitura em andamento"}
+            </span>
             <p className="draw-hero-result">
-              {latestDraw?.label || "Nenhum sorteio realizado ainda"}
+              {activeCycle
+                ? `${activeCycle.bookTitle}, de ${activeCycle.bookAuthor}`
+                : "Sorteie um livro abaixo para abrir a próxima leitura"}
             </p>
             <div className="draw-hero-status">
               {activeCycle ? (
                 <>
                   <span>
-                    Rodada ativa: <strong>{activeCycle.bookTitle}</strong>
-                    {" — "}
                     {cycleConfigured
                       ? getCycleRulesSummary(activeCycle)
-                      : "aguardando o grupo definir início, encontros e metas."}
+                      : "Aguardando o grupo definir início, encontros e metas."}
                   </span>
-                  <button
-                    className="button button-ghost"
-                    type="button"
-                    onClick={() => setIsRoutineModalOpen(true)}
-                  >
-                    Editar rotina
-                  </button>
+                  <div className="draw-hero-actions">
+                    <button
+                      className={currentUserParticipates ? "button button-danger" : "button button-primary"}
+                      type="button"
+                      disabled={isPending}
+                      onClick={currentUserParticipates ? leaveReadingCycle : joinReadingCycle}
+                    >
+                      {currentUserParticipates ? "Sair da leitura" : "Entrar na leitura"}
+                    </button>
+                    <button
+                      className="button button-ghost"
+                      type="button"
+                      onClick={() => setIsRoutineModalOpen(true)}
+                    >
+                      Editar rotina
+                    </button>
+                  </div>
                 </>
               ) : (
                 <span>Monte a lista ao lado e gire o sorteio para abrir uma nova rodada.</span>
@@ -592,8 +672,8 @@ function DrawPage({
           </div>
           <div className="draw-hero-stats">
             <HeroStat value={availableBooks.length} label="elegíveis" />
-            <HeroStat value={selectedCount} label="selecionados" />
-            <HeroStat value={readBooks.length} label="já lidos" />
+            <HeroStat value={activeCycleParticipants.length} label="participando" />
+            <HeroStat value={activeReadingProgress.length} label="leitores" />
           </div>
         </div>
 
@@ -676,7 +756,9 @@ function DrawPage({
                       />
                       <span>
                         <strong>{book.title}</strong>
-                        <small>{book.author} · indicado por {book.recommender}</small>
+                        <small>
+                          {book.author} · {book.genre || "Sem gênero"} · indicado por {book.recommender}
+                        </small>
                       </span>
                     </label>
                   ))}
@@ -688,7 +770,7 @@ function DrawPage({
                       <input type="checkbox" disabled />
                       <span>
                         <strong>{book.title}</strong>
-                        <small>{book.author} · já lido</small>
+                        <small>{book.author} · {book.genre || "Sem gênero"} · já lido</small>
                       </span>
                     </div>
                   ))}
@@ -705,10 +787,10 @@ function DrawPage({
                 disabled={isPending || !selectedCount}
                 onClick={() => runAction(() => drawBookAction(selectedDrawBookIds))}
               >
-                Sortear livro ({selectedCount})
+                Sortear nova leitura ({selectedCount})
               </button>
               <small>
-                O sorteio escolhe um título aleatório entre os selecionados e abre a rodada.
+                O sorteio escolhe um título aleatório entre os selecionados e abre a nova leitura.
               </small>
             </div>
           </div>
@@ -717,39 +799,45 @@ function DrawPage({
             {activeCycle ? (
               <div className="panel rail-card volunteer-card">
                 <div>
-                  <span className="summary-label">Participação voluntária</span>
-                  <h3>{activeParticipants.length} leitor(es) dentro</h3>
-                  <p>Entra na leitura quem quiser acompanhar esse livro.</p>
+                  <span className="summary-label">Quem está nessa leitura</span>
+                  <h3>{activeCycleParticipants.length} participante(s)</h3>
+                  <p>Entra na leitura quem quiser acompanhar esse livro, a qualquer momento.</p>
                 </div>
-                <button
-                  className={currentUserParticipates ? "button button-danger" : "button button-primary"}
-                  type="button"
-                  disabled={isPending}
-                  onClick={currentUserParticipates ? leaveReadingCycle : joinReadingCycle}
-                >
-                  {currentUserParticipates ? "Sair da leitura" : "Entrar na leitura"}
-                </button>
-                <div className="volunteer-list">
-                  {activeParticipants.length ? (
-                    activeParticipants.map((participant) => (
-                      <span className="member-chip" key={participant.id || participant.discordHandle}>
-                        {participant.displayName || participant.discordHandle || "Leitor da tropa"}
-                      </span>
+                <div className="participant-list">
+                  {activeCycleParticipants.length ? (
+                    activeCycleParticipants.map((participant) => (
+                      <ParticipantRow key={participant.id} participant={participant} />
                     ))
                   ) : (
-                    <EmptyState message="Ninguém entrou voluntariamente ainda." />
+                    <EmptyState message="Ninguém entrou ainda. Seja o primeiro." />
+                  )}
+                </div>
+              </div>
+            ) : null}
+
+            {activeCycle ? (
+              <div className="panel rail-card reading-progress-card">
+                <span className="summary-label">Progresso da leitura</span>
+                <div className="reading-progress-list">
+                  {activeReadingProgress.length ? (
+                    activeReadingProgress.map((reader) => (
+                      <ProgressRow key={reader.userId || reader.id} progress={reader} />
+                    ))
+                  ) : (
+                    <EmptyState message="O progresso aparece quando a leitura tiver participantes." />
                   )}
                 </div>
               </div>
             ) : null}
 
             <div className="panel rail-card history-card">
-              <span className="summary-label">Histórico de sorteios</span>
-              <div className="history-list" aria-label="Histórico de sorteios">
-                {history.length ? (
-                  history.map((item) => <span key={item.id}>{item.label}</span>)
+              <span className="summary-label">Histórico de leituras</span>
+              <p className="rail-card-hint">Abra uma leitura anterior para ver quem participou e quando entrou.</p>
+              <div className="reading-history-list" aria-label="Histórico de leituras">
+                {pastCycles.length ? (
+                  pastCycles.map((cycle) => <ReadingHistoryCard key={cycle.id} cycle={cycle} />)
                 ) : (
-                  <span className="history-empty">Nenhum sorteio registrado ainda.</span>
+                  <EmptyState message="Nenhuma leitura anterior registrada ainda." />
                 )}
               </div>
             </div>
@@ -1018,6 +1106,100 @@ function HeroStat({ value, label }) {
   );
 }
 
+function ProgressRow({ progress }) {
+  const name = progress.displayName || progress.discordHandle || "Leitor da tropa";
+
+  return (
+    <div className="progress-row">
+      <div className="progress-row-head">
+        <strong>{name}</strong>
+        <span>{progress.percent}%</span>
+      </div>
+      <div className="progress-track" aria-hidden="true">
+        <span style={{ width: `${progress.percent}%` }} />
+      </div>
+      <small>
+        Pagina {progress.currentPage} · {progress.dailyPages} paginas hoje
+      </small>
+    </div>
+  );
+}
+
+function ParticipantRow({ participant }) {
+  const name = participant.displayName || participant.discordHandle || "Leitor da tropa";
+  const readingSummary = getParticipantReadingSummary(participant);
+
+  return (
+    <div className="participant-row">
+      <div className="participant-row-head">
+        <strong>{name}</strong>
+        {participant.joinedAt ? <span>entrou em {formatDateTime(participant.joinedAt)}</span> : null}
+      </div>
+      <small className={`participant-reading${participant.finishedAt ? " is-done" : ""}`}>
+        {readingSummary}
+      </small>
+    </div>
+  );
+}
+
+function getParticipantReadingSummary(participant) {
+  if (participant.finishedAt) {
+    return participant.startedAt
+      ? `Leu de ${formatDateTime(participant.startedAt)} até ${formatDateTime(participant.finishedAt)}`
+      : `Terminou em ${formatDateTime(participant.finishedAt)}`;
+  }
+  if (participant.startedAt) {
+    return `Começou em ${formatDateTime(participant.startedAt)} · em andamento`;
+  }
+  return "Ainda não registrou progresso neste livro";
+}
+
+function ReadingHistoryCard({ cycle }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const participants = cycle.participants || [];
+  const statusLabel = getCycleStatusLabel(cycle.status);
+
+  return (
+    <div className={`reading-history-item${isOpen ? " is-open" : ""}`}>
+      <button
+        className="reading-history-toggle"
+        type="button"
+        aria-expanded={isOpen}
+        onClick={() => setIsOpen((open) => !open)}
+      >
+        <span className="reading-history-info">
+          <strong>{cycle.bookTitle}</strong>
+          <small>
+            {cycle.bookAuthor} · {participants.length} participante(s)
+            {statusLabel ? ` · ${statusLabel}` : ""}
+          </small>
+        </span>
+        <span className="reading-history-chevron" aria-hidden="true">
+          {isOpen ? "−" : "+"}
+        </span>
+      </button>
+      {isOpen ? (
+        <div className="participant-list">
+          {participants.length ? (
+            participants.map((participant) => (
+              <ParticipantRow key={participant.id} participant={participant} />
+            ))
+          ) : (
+            <EmptyState message="Sem participantes registrados nessa leitura." />
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function getCycleStatusLabel(status) {
+  if (status === "active") return "em andamento";
+  if (status === "planning") return "aguardando regras";
+  if (status === "finished") return "encerrada";
+  return "";
+}
+
 function SummaryItem({ label, value }) {
   return (
     <div className="reading-summary">
@@ -1072,56 +1254,385 @@ function FilterButton({ active, children, onClick }) {
   );
 }
 
-function RecommendationCard({ book, disabled, onRemove, onToggleRead }) {
-  return (
-    <article className="book-card">
-      <header>
-        <div className="card-tags">
-          <span className="tag">{book.mood}</span>
-          <span className={`tag ${book.isRead ? "tag-read" : "tag-unread"}`}>
-            {book.isRead ? "Lido" : "Não lido"}
-          </span>
+function RecommendationCard({
+  book,
+  currentUserId,
+  disabled,
+  onEdit,
+  onProgress,
+  onRemove,
+  onToggleRead,
+  onAddReview,
+  onDeleteReview
+}) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [isProgressOpen, setIsProgressOpen] = useState(false);
+  const [isReviewsOpen, setIsReviewsOpen] = useState(false);
+  const progress = book.progress || { currentPage: 0, dailyPages: 0, percent: 0 };
+  const reviews = book.reviews || [];
+  const progressSummary = book.isRead
+    ? "Lido"
+    : book.pages
+      ? `${progress.percent}% · pagina ${progress.currentPage} de ${book.pages}`
+      : progress.currentPage
+        ? `Pagina ${progress.currentPage} (defina o total de paginas para ver o %)`
+        : "Sem progresso ainda";
+
+  const submitEdit = (event) => {
+    event.preventDefault();
+    onEdit(new FormData(event.currentTarget), () => setIsEditing(false));
+  };
+
+  const submitProgress = (formData) => {
+    onProgress(formData);
+    setIsProgressOpen(false);
+  };
+
+  if (isEditing) {
+    return (
+      <form className="book-card book-card-edit" onSubmit={submitEdit}>
+        <input type="hidden" name="id" value={book.id} />
+        <header>
+          <span className="summary-label">Editar livro</span>
+          <h3>{book.title}</h3>
+        </header>
+        <div className="field-pair">
+          <Field label="Titulo" name="title" defaultValue={book.title} required />
+          <Field label="Autor" name="author" defaultValue={book.author} required />
         </div>
-        <h3>{book.title}</h3>
-        <span className="meta-line">
-          {book.author} · indicado por {book.recommender}
-        </span>
-      </header>
-      <p>{book.reason}</p>
-      <div className="card-actions">
-        {book.fileUrl ? (
-          <a className="button button-secondary" href={book.fileUrl} target="_blank" rel="noreferrer">
-            Abrir arquivo
-          </a>
-        ) : null}
-        <button className="button button-secondary" type="button" disabled={disabled} onClick={onToggleRead}>
-          {book.isRead ? "Marcar não lido" : "Marcar lido"}
-        </button>
-        <button className="button button-danger" type="button" disabled={disabled} onClick={onRemove}>
-          Remover
-        </button>
+        <div className="field-pair">
+          <Field label="Genero" name="genre" defaultValue={book.genre} required />
+          <Field label="Paginas" name="pages" type="number" min="1" max="5000" defaultValue={book.pages || ""} />
+        </div>
+        <Field
+          label="Link do Google Drive"
+          name="fileUrl"
+          type="url"
+          inputMode="url"
+          defaultValue={book.fileUrl}
+        />
+        <Field
+          label="Link da capa"
+          name="coverUrl"
+          type="url"
+          inputMode="url"
+          defaultValue={book.coverUrl}
+        />
+        <Textarea label="Motivo" name="reason" rows="4" defaultValue={book.reason} required />
+        <div className="card-actions">
+          <button className="button button-primary" type="submit" disabled={disabled}>
+            Salvar
+          </button>
+          <button className="button button-secondary" type="button" onClick={() => setIsEditing(false)}>
+            Cancelar
+          </button>
+        </div>
+      </form>
+    );
+  }
+
+  return (
+    <article className="book-card book-card-compact">
+      <div className="book-card-top">
+        {book.coverUrl ? (
+          <img className="book-cover" src={book.coverUrl} alt={`Capa de ${book.title}`} loading="lazy" />
+        ) : (
+          <div className="book-cover book-cover-placeholder" aria-hidden="true">
+            {book.title.charAt(0)}
+          </div>
+        )}
+        <header>
+          <div className="card-tags">
+            <span className={`tag ${book.genre ? "tag-genre" : "tag-muted"}`}>
+              {book.genre || "Sem genero"}
+            </span>
+            <span className={`tag ${book.isRead ? "tag-read" : "tag-unread"}`}>
+              {book.isRead ? "Lido" : "Nao lido"}
+            </span>
+          </div>
+          <h3>{book.title}</h3>
+          <span className="meta-line">
+            {book.author} · {book.pages ? `${book.pages} paginas · ` : ""}indicado por {book.recommender}
+          </span>
+        </header>
       </div>
+
+      <div className="book-progress-bar" aria-label={`Progresso de leitura: ${progressSummary}`}>
+        <div className="progress-track" aria-hidden="true">
+          <span style={{ width: `${book.isRead ? 100 : progress.percent}%` }} />
+        </div>
+        <small>{progressSummary}</small>
+      </div>
+
+      <div className="card-actions">
+        <button
+          className="button button-primary"
+          type="button"
+          disabled={disabled}
+          onClick={() => setIsProgressOpen(true)}
+        >
+          Registrar progresso
+        </button>
+        <button
+          className="button button-secondary"
+          type="button"
+          disabled={disabled}
+          onClick={() => setIsReviewsOpen(true)}
+        >
+          Resenhas{reviews.length ? ` (${reviews.length})` : ""}
+        </button>
+        <button className="button button-secondary" type="button" disabled={disabled} onClick={onToggleRead}>
+          {book.isRead ? "Marcar nao lido" : "Marcar lido"}
+        </button>
+        {book.canEdit ? (
+          <>
+            <button className="button button-secondary" type="button" disabled={disabled} onClick={() => setIsEditing(true)}>
+              Editar
+            </button>
+            <button className="button button-danger" type="button" disabled={disabled} onClick={onRemove}>
+              Remover
+            </button>
+          </>
+        ) : null}
+      </div>
+
+      {isReviewsOpen ? (
+        <ReviewsModal
+          book={book}
+          reviews={reviews}
+          myReview={book.myReview}
+          currentUserId={currentUserId}
+          disabled={disabled}
+          onClose={() => setIsReviewsOpen(false)}
+          onAddReview={onAddReview}
+          onDeleteReview={onDeleteReview}
+        />
+      ) : null}
+
+      {isProgressOpen ? (
+        <BookProgressModal
+          book={book}
+          progress={progress}
+          disabled={disabled}
+          onClose={() => setIsProgressOpen(false)}
+          onSubmit={submitProgress}
+        />
+      ) : null}
     </article>
   );
 }
 
-function SuggestionItem({ suggestion, disabled, onPromote, onVote, onRemove }) {
+function BookProgressModal({ book, progress, disabled, onClose, onSubmit }) {
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  const submit = (event) => {
+    event.preventDefault();
+    onSubmit(new FormData(event.currentTarget));
+  };
+
+  const pageTotal = book.pages ? ` de ${book.pages}` : "";
+  const modalSummary = book.pages
+    ? `Pagina ${progress.currentPage}${pageTotal} · ${progress.percent}% concluido · ${progress.dailyPages} paginas hoje`
+    : `Pagina ${progress.currentPage} · ${progress.dailyPages} paginas hoje · defina o total de paginas no "Editar" para acompanhar o %`;
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="modal-panel progress-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="progress-modal-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="modal-header">
+          <div>
+            <span className="summary-label">Seu progresso</span>
+            <h2 id="progress-modal-title">{book.title}</h2>
+            <p>{modalSummary}</p>
+          </div>
+          <button className="modal-close" type="button" aria-label="Fechar modal" onClick={onClose}>
+            &times;
+          </button>
+        </header>
+
+        <div className="progress-track" aria-hidden="true">
+          <span style={{ width: `${book.isRead ? 100 : progress.percent}%` }} />
+        </div>
+
+        <form className="progress-modal-form" onSubmit={submit}>
+          <input type="hidden" name="recommendationId" value={book.id} />
+          <Field
+            label="Pagina atual"
+            name="currentPage"
+            type="number"
+            min="0"
+            max={book.pages || 5000}
+            defaultValue={progress.currentPage}
+          />
+          <div className="modal-actions">
+            <button className="button button-secondary" type="button" onClick={onClose}>
+              Cancelar
+            </button>
+            <button className="button button-primary" type="submit" disabled={disabled}>
+              Salvar progresso
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function ReviewsModal({
+  book,
+  reviews,
+  myReview,
+  currentUserId,
+  disabled,
+  onClose,
+  onAddReview,
+  onDeleteReview
+}) {
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  const submit = (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    onAddReview(new FormData(form), () => form.reset());
+  };
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="modal-panel reviews-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="reviews-modal-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="modal-header">
+          <div>
+            <span className="summary-label">Resenhas da tropa</span>
+            <h2 id="reviews-modal-title">{book.title}</h2>
+            <p>Cada resenha vale pontos no seu perfil. Uma resenha por livro.</p>
+          </div>
+          <button className="modal-close" type="button" aria-label="Fechar modal" onClick={onClose}>
+            &times;
+          </button>
+        </header>
+
+        <div className="review-list">
+          {reviews.length ? (
+            reviews.map((review) => (
+              <article className="review-item" key={review.id}>
+                <div className="review-head">
+                  <strong>{review.author}</strong>
+                  <span>{formatDate(review.createdAt)}</span>
+                </div>
+                <p>{review.content}</p>
+                {review.userId === currentUserId ? (
+                  <button
+                    className="link-button"
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => onDeleteReview(review.id)}
+                  >
+                    Remover resenha
+                  </button>
+                ) : null}
+              </article>
+            ))
+          ) : (
+            <EmptyState message="Nenhuma resenha ainda. Seja o primeiro calvo a opinar." />
+          )}
+        </div>
+
+        {myReview ? (
+          <p className="review-note">Você já publicou sua resenha desse livro.</p>
+        ) : (
+          <form className="reviews-modal-form" onSubmit={submit}>
+            <input type="hidden" name="recommendationId" value={book.id} />
+            <Textarea
+              label="Sua resenha"
+              name="content"
+              rows="4"
+              placeholder="O que você achou da leitura?"
+              required
+            />
+            <div className="modal-actions">
+              <button className="button button-secondary" type="button" onClick={onClose}>
+                Fechar
+              </button>
+              <button className="button button-primary" type="submit" disabled={disabled}>
+                Publicar resenha
+              </button>
+            </div>
+          </form>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function SuggestionItem({
+  suggestion,
+  currentUserId,
+  disabled,
+  onPromote,
+  onVote,
+  onRemove,
+  onAddComment,
+  onDeleteComment
+}) {
+  const [isDiscussionOpen, setIsDiscussionOpen] = useState(false);
   const pages = suggestion.pages ? `${suggestion.pages} páginas · ` : "";
+  const comments = suggestion.comments || [];
 
   return (
     <article className="suggestion-item">
-      <header>
-        <h3>{suggestion.title}</h3>
-        <span className="meta-line">
-          {suggestion.author} · {pages}sugerido por {suggestion.suggestedBy}
-        </span>
-        <p>{suggestion.pitch}</p>
-        {suggestion.fileUrl ? (
-          <a className="file-link" href={suggestion.fileUrl} target="_blank" rel="noreferrer">
-            Abrir arquivo
-          </a>
+      <div className="suggestion-main">
+        {suggestion.coverUrl ? (
+          <img
+            className="suggestion-cover"
+            src={suggestion.coverUrl}
+            alt={`Capa de ${suggestion.title}`}
+            loading="lazy"
+          />
         ) : null}
-      </header>
+        <header>
+          <h3>{suggestion.title}</h3>
+          {suggestion.genre ? <span className="tag tag-genre">{suggestion.genre}</span> : null}
+          <span className="meta-line">
+            {suggestion.author} · {pages}sugerido por {suggestion.suggestedBy}
+          </span>
+          <p>{suggestion.pitch}</p>
+          {suggestion.fileUrl ? (
+            <a className="file-link" href={suggestion.fileUrl} target="_blank" rel="noreferrer">
+              Abrir arquivo
+            </a>
+          ) : null}
+          <button
+            className="link-button"
+            type="button"
+            disabled={disabled}
+            onClick={() => setIsDiscussionOpen(true)}
+          >
+            Discussão{comments.length ? ` (${comments.length})` : ""}
+          </button>
+        </header>
+      </div>
       <div className="vote-box">
         <span className="vote-count">{suggestion.votes}</span>
         <button className="button button-primary" type="button" disabled={disabled} onClick={onPromote}>
@@ -1134,7 +1645,111 @@ function SuggestionItem({ suggestion, disabled, onPromote, onVote, onRemove }) {
           Remover
         </button>
       </div>
+
+      {isDiscussionOpen ? (
+        <DiscussionModal
+          suggestion={suggestion}
+          comments={comments}
+          currentUserId={currentUserId}
+          disabled={disabled}
+          onClose={() => setIsDiscussionOpen(false)}
+          onAddComment={onAddComment}
+          onDeleteComment={onDeleteComment}
+        />
+      ) : null}
     </article>
+  );
+}
+
+function DiscussionModal({
+  suggestion,
+  comments,
+  currentUserId,
+  disabled,
+  onClose,
+  onAddComment,
+  onDeleteComment
+}) {
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  const submit = (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    onAddComment(new FormData(form), () => form.reset());
+  };
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        className="modal-panel discussion-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="discussion-modal-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="modal-header">
+          <div>
+            <span className="summary-label">Discussão</span>
+            <h2 id="discussion-modal-title">{suggestion.title}</h2>
+            <p>Debata a indicação com a tropa antes de virar acervo.</p>
+          </div>
+          <button className="modal-close" type="button" aria-label="Fechar modal" onClick={onClose}>
+            &times;
+          </button>
+        </header>
+
+        <div className="thread-list">
+          {comments.length ? (
+            comments.map((comment) => (
+              <article className="thread-item" key={comment.id}>
+                <div className="thread-head">
+                  <strong>{comment.author}</strong>
+                  <span>{formatDate(comment.createdAt)}</span>
+                </div>
+                <p>{comment.content}</p>
+                {comment.userId === currentUserId ? (
+                  <button
+                    className="link-button"
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => onDeleteComment(comment.id)}
+                  >
+                    Remover
+                  </button>
+                ) : null}
+              </article>
+            ))
+          ) : (
+            <EmptyState message="Nenhuma mensagem ainda. Comece a discussão." />
+          )}
+        </div>
+
+        <form className="discussion-modal-form" onSubmit={submit}>
+          <input type="hidden" name="suggestionId" value={suggestion.id} />
+          <Textarea
+            label="Sua mensagem"
+            name="content"
+            rows="3"
+            placeholder="Escreva um comentário para a tropa..."
+            required
+          />
+          <div className="modal-actions">
+            <button className="button button-secondary" type="button" onClick={onClose}>
+              Fechar
+            </button>
+            <button className="button button-primary" type="submit" disabled={disabled}>
+              Enviar mensagem
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
   );
 }
 
@@ -1193,6 +1808,7 @@ function normalizeState(state) {
     leaderboard: state?.leaderboard ?? [],
     checkins: state?.checkins ?? [],
     activeParticipants: state?.activeParticipants ?? [],
+    activeReadingProgress: state?.activeReadingProgress ?? [],
     currentUserParticipates: state?.currentUserParticipates ?? false,
     setupError: state?.setupError ?? ""
   };

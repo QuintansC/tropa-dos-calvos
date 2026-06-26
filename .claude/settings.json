@@ -1,7 +1,16 @@
 {
   "permissions": {
     "allow": [
-      "Bash(node -e \"require\\('fs'\\).readFileSync\\('src/App.jsx','utf8'\\); console.log\\('read ok'\\)\")"
+      "Bash(node -e \"require\\('fs'\\).readFileSync\\('src/App.jsx','utf8'\\); console.log\\('read ok'\\)\")",
+      "PowerShell(Get-NetTCPConnection -LocalPort 3001 -ErrorAction SilentlyContinue)",
+      "PowerShell(Stop-Process -Id 46844 -Force)",
+      "PowerShell(Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Select-Object ProcessId, @{Name='Cmd';Expression={$_.CommandLine}} | Format-Table -AutoSize -Wrap)",
+      "Bash(npx --no-install esbuild src/App.jsx --loader=jsx --outfile=/dev/null)",
+      "Bash(\"node_modules/@esbuild/.win32-x64-1abGnUzx/esbuild.exe\" src/App.jsx --loader=jsx --outfile=/dev/null)",
+      "Bash(\"node_modules/@esbuild/.win32-x64-1abGnUzx/esbuild.exe\" --loader=jsx --outfile=/dev/null)",
+      "Bash(\"node_modules/@esbuild/.win32-x64-1abGnUzx/esbuild.exe\" --loader=jsx)",
+      "Bash(ls -la src/assets/)",
+      "Bash(ls -la public)"
     ]
   }
 }

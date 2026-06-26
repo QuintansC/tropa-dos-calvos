@@ -6,24 +6,38 @@ create table if not exists public.recommendations (
   author text not null,
   recommender text not null,
   mood text not null check (mood in ('Debate forte', 'Leitura leve', 'Clássico', 'Surpresa')),
+  genre text not null default '',
+  pages integer check (pages is null or pages > 0),
   reason text not null,
   file_url text,
+  cover_url text,
   is_read boolean not null default false,
+  suggested_by_user uuid references auth.users(id) on delete set null,
   created_by uuid not null default auth.uid() references auth.users(id) on delete cascade,
   created_at timestamptz not null default now()
 );
 
 alter table public.recommendations
+add column if not exists genre text not null default '',
+add column if not exists pages integer check (pages is null or pages > 0),
 add column if not exists file_url text,
+add column if not exists cover_url text,
+add column if not exists suggested_by_user uuid references auth.users(id) on delete set null,
 add column if not exists is_read boolean not null default false;
+
+update public.recommendations
+set suggested_by_user = created_by
+where suggested_by_user is null;
 
 create table if not exists public.suggestions (
   id uuid primary key default gen_random_uuid(),
   title text not null,
   author text not null,
   suggested_by text not null,
+  genre text not null default '',
   pages integer check (pages is null or pages > 0),
   file_url text,
+  cover_url text,
   pitch text not null,
   votes integer not null default 1 check (votes >= 0),
   created_by uuid not null default auth.uid() references auth.users(id) on delete cascade,
@@ -31,7 +45,9 @@ create table if not exists public.suggestions (
 );
 
 alter table public.suggestions
-add column if not exists file_url text;
+add column if not exists genre text not null default '',
+add column if not exists file_url text,
+add column if not exists cover_url text;
 
 create table if not exists public.members (
   id uuid primary key default gen_random_uuid(),
@@ -114,11 +130,70 @@ create table if not exists public.reading_participants (
   unique (cycle_id, user_id)
 );
 
+create table if not exists public.book_progress (
+  id uuid primary key default gen_random_uuid(),
+  recommendation_id uuid not null references public.recommendations(id) on delete cascade,
+  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  current_page integer not null default 0 check (current_page >= 0),
+  is_read boolean not null default false,
+  started_at timestamptz,
+  finished_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (recommendation_id, user_id)
+);
+
+alter table public.book_progress
+add column if not exists started_at timestamptz,
+add column if not exists finished_at timestamptz;
+
+create table if not exists public.book_progress_events (
+  id uuid primary key default gen_random_uuid(),
+  progress_id uuid references public.book_progress(id) on delete cascade,
+  recommendation_id uuid not null references public.recommendations(id) on delete cascade,
+  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  previous_page integer not null default 0 check (previous_page >= 0),
+  current_page integer not null check (current_page >= 0),
+  pages_delta integer not null default 0,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.book_reviews (
+  id uuid primary key default gen_random_uuid(),
+  recommendation_id uuid not null references public.recommendations(id) on delete cascade,
+  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  content text not null,
+  points_awarded integer not null default 0 check (points_awarded >= 0),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (recommendation_id, user_id)
+);
+
+create table if not exists public.suggestion_comments (
+  id uuid primary key default gen_random_uuid(),
+  suggestion_id uuid not null references public.suggestions(id) on delete cascade,
+  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  content text not null,
+  created_at timestamptz not null default now()
+);
+
 create unique index if not exists recommendations_title_author_unique
 on public.recommendations (title, author);
 
 create unique index if not exists suggestions_title_author_unique
 on public.suggestions (title, author);
+
+create index if not exists book_progress_recommendation_idx
+on public.book_progress (recommendation_id);
+
+create index if not exists book_progress_events_recommendation_created_idx
+on public.book_progress_events (recommendation_id, created_at desc);
+
+create index if not exists book_reviews_recommendation_idx
+on public.book_reviews (recommendation_id, created_at desc);
+
+create index if not exists suggestion_comments_suggestion_idx
+on public.suggestion_comments (suggestion_id, created_at asc);
 
 alter table public.recommendations
 drop constraint if exists recommendations_file_url_http_check;
@@ -134,6 +209,20 @@ alter table public.suggestions
 add constraint suggestions_file_url_http_check
 check (file_url is null or file_url ~* '^https?://');
 
+alter table public.recommendations
+drop constraint if exists recommendations_cover_url_http_check;
+
+alter table public.recommendations
+add constraint recommendations_cover_url_http_check
+check (cover_url is null or cover_url ~* '^https?://');
+
+alter table public.suggestions
+drop constraint if exists suggestions_cover_url_http_check;
+
+alter table public.suggestions
+add constraint suggestions_cover_url_http_check
+check (cover_url is null or cover_url ~* '^https?://');
+
 alter table public.recommendations enable row level security;
 alter table public.suggestions enable row level security;
 alter table public.members enable row level security;
@@ -142,6 +231,10 @@ alter table public.profiles enable row level security;
 alter table public.reading_cycles enable row level security;
 alter table public.reading_checkins enable row level security;
 alter table public.reading_participants enable row level security;
+alter table public.book_progress enable row level security;
+alter table public.book_progress_events enable row level security;
+alter table public.book_reviews enable row level security;
+alter table public.suggestion_comments enable row level security;
 
 drop policy if exists "public read recommendations" on public.recommendations;
 drop policy if exists "public insert recommendations" on public.recommendations;
@@ -164,13 +257,13 @@ with check (created_by = auth.uid());
 create policy "authenticated update recommendations"
 on public.recommendations for update
 to authenticated
-using (true)
-with check (true);
+using (coalesce(suggested_by_user, created_by) = auth.uid())
+with check (coalesce(suggested_by_user, created_by) = auth.uid());
 
 create policy "authenticated delete recommendations"
 on public.recommendations for delete
 to authenticated
-using (true);
+using (coalesce(suggested_by_user, created_by) = auth.uid());
 
 drop policy if exists "public read suggestions" on public.suggestions;
 drop policy if exists "public insert suggestions" on public.suggestions;
@@ -312,6 +405,90 @@ on public.reading_participants for delete
 to authenticated
 using (user_id = auth.uid());
 
+drop policy if exists "authenticated read book progress" on public.book_progress;
+drop policy if exists "authenticated insert own book progress" on public.book_progress;
+drop policy if exists "authenticated update own book progress" on public.book_progress;
+drop policy if exists "authenticated delete own book progress" on public.book_progress;
+
+create policy "authenticated read book progress"
+on public.book_progress for select
+to authenticated
+using (true);
+
+create policy "authenticated insert own book progress"
+on public.book_progress for insert
+to authenticated
+with check (user_id = auth.uid());
+
+create policy "authenticated update own book progress"
+on public.book_progress for update
+to authenticated
+using (user_id = auth.uid())
+with check (user_id = auth.uid());
+
+create policy "authenticated delete own book progress"
+on public.book_progress for delete
+to authenticated
+using (user_id = auth.uid());
+
+drop policy if exists "authenticated read book progress events" on public.book_progress_events;
+drop policy if exists "authenticated insert own book progress events" on public.book_progress_events;
+
+create policy "authenticated read book progress events"
+on public.book_progress_events for select
+to authenticated
+using (true);
+
+create policy "authenticated insert own book progress events"
+on public.book_progress_events for insert
+to authenticated
+with check (user_id = auth.uid());
+
+drop policy if exists "authenticated read book reviews" on public.book_reviews;
+drop policy if exists "authenticated insert own book reviews" on public.book_reviews;
+drop policy if exists "authenticated update own book reviews" on public.book_reviews;
+drop policy if exists "authenticated delete own book reviews" on public.book_reviews;
+
+create policy "authenticated read book reviews"
+on public.book_reviews for select
+to authenticated
+using (true);
+
+create policy "authenticated insert own book reviews"
+on public.book_reviews for insert
+to authenticated
+with check (user_id = auth.uid());
+
+create policy "authenticated update own book reviews"
+on public.book_reviews for update
+to authenticated
+using (user_id = auth.uid())
+with check (user_id = auth.uid());
+
+create policy "authenticated delete own book reviews"
+on public.book_reviews for delete
+to authenticated
+using (user_id = auth.uid());
+
+drop policy if exists "authenticated read suggestion comments" on public.suggestion_comments;
+drop policy if exists "authenticated insert own suggestion comments" on public.suggestion_comments;
+drop policy if exists "authenticated delete own suggestion comments" on public.suggestion_comments;
+
+create policy "authenticated read suggestion comments"
+on public.suggestion_comments for select
+to authenticated
+using (true);
+
+create policy "authenticated insert own suggestion comments"
+on public.suggestion_comments for insert
+to authenticated
+with check (user_id = auth.uid());
+
+create policy "authenticated delete own suggestion comments"
+on public.suggestion_comments for delete
+to authenticated
+using (user_id = auth.uid());
+
 drop function if exists public.get_public_profile_summaries();
 
 create function public.get_public_profile_summaries()
@@ -374,6 +551,29 @@ $$;
 
 revoke all on function public.has_profile_discord_handle(text) from public, anon, authenticated;
 grant execute on function public.has_profile_discord_handle(text) to authenticated;
+
+drop function if exists public.add_all_profiles_to_reading_cycle(uuid);
+
+create function public.add_all_profiles_to_reading_cycle(target_cycle_id uuid)
+returns void
+language sql
+security definer
+set search_path = public
+as $$
+  insert into public.reading_participants (cycle_id, user_id)
+  select target_cycle_id, user_id
+  from (
+    select profiles.id as user_id
+    from public.profiles
+    union
+    select auth.uid() as user_id
+  ) participants
+  where user_id is not null
+  on conflict (cycle_id, user_id) do nothing;
+$$;
+
+revoke all on function public.add_all_profiles_to_reading_cycle(uuid) from public, anon, authenticated;
+grant execute on function public.add_all_profiles_to_reading_cycle(uuid) to authenticated;
 
 create or replace function public.increment_suggestion_vote(target_id uuid)
 returns void

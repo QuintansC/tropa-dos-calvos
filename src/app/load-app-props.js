@@ -39,6 +39,7 @@ async function getBookClubStateOrSetupState(supabase, userId) {
         leaderboard: [],
         checkins: [],
         activeParticipants: [],
+        activeReadingProgress: [],
         currentUserParticipates: false,
         setupError:
           "As tabelas do clube ainda não existem no Supabase. Rode o SQL de supabase/schema.sql no SQL Editor do projeto."

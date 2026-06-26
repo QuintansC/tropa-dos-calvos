@@ -4,20 +4,29 @@ import { randomInt } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { createClient } from "../lib/supabase/server.js";
 
+const REVIEW_POINTS = 20;
+
 export async function createRecommendationAction(formData) {
   const auth = await getAuthenticatedClient();
   if (!auth.ok) return auth;
 
   const fileUrl = normalizeExternalUrl(formData.get("fileUrl"));
   if (fileUrl === false) return { ok: false, message: "Informe um link externo valido para o arquivo." };
+  const coverUrl = normalizeExternalUrl(formData.get("coverUrl"));
+  if (coverUrl === false) return { ok: false, message: "Informe um link valido para a capa." };
+  const pages = Number(formData.get("pages"));
 
   const payload = {
     title: clean(formData.get("title")),
     author: clean(formData.get("author")),
     recommender: clean(formData.get("recommender")),
     mood: clean(formData.get("mood")),
+    genre: clean(formData.get("genre")),
+    pages: Number.isFinite(pages) && pages > 0 ? Math.round(pages) : null,
     reason: clean(formData.get("reason")),
     file_url: fileUrl,
+    cover_url: coverUrl,
+    suggested_by_user: auth.userId,
     created_by: auth.userId
   };
 
@@ -39,19 +48,23 @@ export async function createSuggestionAction(formData) {
   const pages = Number(formData.get("pages"));
   const fileUrl = normalizeExternalUrl(formData.get("fileUrl"));
   if (fileUrl === false) return { ok: false, message: "Informe um link externo valido para o arquivo." };
+  const coverUrl = normalizeExternalUrl(formData.get("coverUrl"));
+  if (coverUrl === false) return { ok: false, message: "Informe um link valido para a capa." };
 
   const payload = {
     title: clean(formData.get("title")),
     author: clean(formData.get("author")),
     suggested_by: clean(formData.get("suggestedBy")),
+    genre: clean(formData.get("genre")),
     pages: Number.isFinite(pages) && pages > 0 ? pages : null,
     file_url: fileUrl,
+    cover_url: coverUrl,
     pitch: clean(formData.get("pitch")),
     votes: 1,
     created_by: auth.userId
   };
 
-  if (!payload.title || !payload.author || !payload.suggested_by || !payload.pitch) {
+  if (!payload.title || !payload.author || !payload.suggested_by || !payload.genre || !payload.pitch) {
     return { ok: false, message: "Preencha os campos da sugestão." };
   }
 
@@ -66,6 +79,52 @@ export async function createSuggestionAction(formData) {
 
   revalidateBookClubPages();
   return { ok: true, message: "Sugestão adicionada para a próxima leitura." };
+}
+
+export async function updateRecommendationAction(formData) {
+  const auth = await getAuthenticatedClient();
+  if (!auth.ok) return auth;
+
+  const id = clean(formData.get("id"));
+  const pages = Number(formData.get("pages"));
+  const fileUrl = normalizeExternalUrl(formData.get("fileUrl"));
+  const coverUrl = normalizeExternalUrl(formData.get("coverUrl"));
+
+  if (!id) return { ok: false, message: "Livro nao encontrado para edicao." };
+  if (fileUrl === false) return { ok: false, message: "Informe um link externo valido para o arquivo." };
+  if (coverUrl === false) return { ok: false, message: "Informe um link valido para a capa." };
+
+  const payload = {
+    title: clean(formData.get("title")),
+    author: clean(formData.get("author")),
+    genre: clean(formData.get("genre")),
+    pages: Number.isFinite(pages) && pages > 0 ? Math.round(pages) : null,
+    reason: clean(formData.get("reason")),
+    file_url: fileUrl,
+    cover_url: coverUrl
+  };
+
+  if (!payload.title || !payload.author || !payload.genre || !payload.reason) {
+    return { ok: false, message: "Preencha titulo, autor, genero e motivo." };
+  }
+
+  const { data: book, error: bookError } = await auth.supabase
+    .from("recommendations")
+    .select("created_by, suggested_by_user")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (bookError) return toActionError(bookError);
+  if (!book) return { ok: false, message: "Livro nao encontrado." };
+  if ((book.suggested_by_user || book.created_by) !== auth.userId) {
+    return { ok: false, message: "Voce so pode editar livros sugeridos por voce." };
+  }
+
+  const { error } = await auth.supabase.from("recommendations").update(payload).eq("id", id);
+  if (error) return toActionError(error);
+
+  revalidateBookClubPages();
+  return { ok: true, message: "Livro atualizado no acervo." };
 }
 
 export async function createMemberAction(formData) {
@@ -105,18 +164,193 @@ export async function toggleRecommendationReadAction(id, isRead) {
   const auth = await getAuthenticatedClient();
   if (!auth.ok) return auth;
 
-  const { error } = await auth.supabase
-    .from("recommendations")
-    .update({ is_read: Boolean(isRead) })
-    .eq("id", id);
+  const recommendationId = clean(id);
+  if (!recommendationId) return { ok: false, message: "Livro nao encontrado." };
 
-  if (error) return toActionError(error);
+  const { data: book, error: bookError } = await auth.supabase
+    .from("recommendations")
+    .select("pages")
+    .eq("id", recommendationId)
+    .maybeSingle();
+
+  if (bookError) return toActionError(bookError);
+  if (!book) return { ok: false, message: "Livro nao encontrado." };
+
+  const { data: currentProgress, error: progressError } = await auth.supabase
+    .from("book_progress")
+    .select("current_page")
+    .eq("recommendation_id", recommendationId)
+    .eq("user_id", auth.userId)
+    .maybeSingle();
+
+  if (progressError) return toActionError(progressError);
+
+  const currentPage =
+    !Boolean(isRead) && book.pages && (currentProgress?.current_page ?? 0) >= book.pages
+      ? Math.max(0, book.pages - 1)
+      : Boolean(isRead) && book.pages
+        ? book.pages
+        : currentProgress?.current_page ?? 0;
+  const result = await saveBookProgress(auth, {
+    recommendationId,
+    currentPage,
+    isRead: Boolean(isRead)
+  });
+
+  if (!result.ok) return result;
 
   revalidateBookClubPages();
   return {
     ok: true,
-    message: isRead ? "Livro marcado como lido." : "Livro voltou para a lista de não lidos."
+    message: isRead ? "Livro marcado como lido para voce." : "Livro voltou para sua lista de nao lidos."
   };
+}
+
+export async function updateBookProgressAction(formData) {
+  const auth = await getAuthenticatedClient();
+  if (!auth.ok) return auth;
+
+  const recommendationId = clean(formData.get("recommendationId"));
+  const currentPage = Number(formData.get("currentPage"));
+
+  if (!recommendationId) return { ok: false, message: "Livro nao encontrado." };
+  if (!Number.isFinite(currentPage) || currentPage < 0) {
+    return { ok: false, message: "Informe uma pagina valida." };
+  }
+
+  const { data: book, error: bookError } = await auth.supabase
+    .from("recommendations")
+    .select("pages")
+    .eq("id", recommendationId)
+    .maybeSingle();
+
+  if (bookError) return toActionError(bookError);
+  if (!book) return { ok: false, message: "Livro nao encontrado." };
+
+  const roundedPage = Math.round(currentPage);
+  if (book.pages && roundedPage > book.pages) {
+    return { ok: false, message: `A pagina nao pode passar de ${book.pages}.` };
+  }
+
+  const result = await saveBookProgress(auth, {
+    recommendationId,
+    currentPage: roundedPage,
+    isRead: Boolean(book.pages && roundedPage >= book.pages)
+  });
+
+  if (!result.ok) return result;
+
+  revalidateBookClubPages();
+  return { ok: true, message: "Progresso atualizado." };
+}
+
+export async function createBookReviewAction(formData) {
+  const auth = await getAuthenticatedClient();
+  if (!auth.ok) return auth;
+
+  const recommendationId = clean(formData.get("recommendationId"));
+  const content = clean(formData.get("content"));
+
+  if (!recommendationId) return { ok: false, message: "Livro nao encontrado." };
+  if (content.length < 10) {
+    return { ok: false, message: "Escreva uma resenha com pelo menos 10 caracteres." };
+  }
+
+  const { data: book, error: bookError } = await auth.supabase
+    .from("recommendations")
+    .select("id")
+    .eq("id", recommendationId)
+    .maybeSingle();
+
+  if (bookError) return toActionError(bookError);
+  if (!book) return { ok: false, message: "Livro nao encontrado." };
+
+  const { error } = await auth.supabase.from("book_reviews").insert({
+    recommendation_id: recommendationId,
+    user_id: auth.userId,
+    content,
+    points_awarded: REVIEW_POINTS
+  });
+
+  if (error?.code === "23505") {
+    return { ok: false, message: "Voce ja escreveu uma resenha desse livro." };
+  }
+  if (error) return toActionError(error);
+
+  const pointsResult = await awardProfilePoints(auth, REVIEW_POINTS);
+  if (!pointsResult.ok) return pointsResult;
+
+  revalidateBookClubPages();
+  return { ok: true, message: `Resenha publicada: +${REVIEW_POINTS} pontos.` };
+}
+
+export async function deleteBookReviewAction(id) {
+  const auth = await getAuthenticatedClient();
+  if (!auth.ok) return auth;
+
+  const reviewId = clean(id);
+  if (!reviewId) return { ok: false, message: "Resenha nao encontrada." };
+
+  const { error } = await auth.supabase
+    .from("book_reviews")
+    .delete()
+    .eq("id", reviewId)
+    .eq("user_id", auth.userId);
+
+  if (error) return toActionError(error);
+
+  revalidateBookClubPages();
+  return { ok: true, message: "Resenha removida." };
+}
+
+export async function createSuggestionCommentAction(formData) {
+  const auth = await getAuthenticatedClient();
+  if (!auth.ok) return auth;
+
+  const suggestionId = clean(formData.get("suggestionId"));
+  const content = clean(formData.get("content"));
+
+  if (!suggestionId) return { ok: false, message: "Sugestao nao encontrada." };
+  if (!content) return { ok: false, message: "Escreva uma mensagem para a discussao." };
+
+  const { data: suggestion, error: suggestionError } = await auth.supabase
+    .from("suggestions")
+    .select("id")
+    .eq("id", suggestionId)
+    .maybeSingle();
+
+  if (suggestionError) return toActionError(suggestionError);
+  if (!suggestion) return { ok: false, message: "Sugestao nao encontrada." };
+
+  const { error } = await auth.supabase.from("suggestion_comments").insert({
+    suggestion_id: suggestionId,
+    user_id: auth.userId,
+    content
+  });
+
+  if (error) return toActionError(error);
+
+  revalidateBookClubPages();
+  return { ok: true, message: "Mensagem enviada para a discussao." };
+}
+
+export async function deleteSuggestionCommentAction(id) {
+  const auth = await getAuthenticatedClient();
+  if (!auth.ok) return auth;
+
+  const commentId = clean(id);
+  if (!commentId) return { ok: false, message: "Mensagem nao encontrada." };
+
+  const { error } = await auth.supabase
+    .from("suggestion_comments")
+    .delete()
+    .eq("id", commentId)
+    .eq("user_id", auth.userId);
+
+  if (error) return toActionError(error);
+
+  revalidateBookClubPages();
+  return { ok: true, message: "Mensagem removida." };
 }
 
 export async function deleteSuggestionAction(id) {
@@ -136,7 +370,7 @@ export async function promoteSuggestionToRecommendationAction(id) {
 
   const { data: suggestion, error: suggestionError } = await auth.supabase
     .from("suggestions")
-    .select("title, author, suggested_by, pitch, file_url")
+    .select("title, author, suggested_by, genre, pages, pitch, file_url, cover_url, created_by")
     .eq("id", id)
     .maybeSingle();
 
@@ -148,8 +382,12 @@ export async function promoteSuggestionToRecommendationAction(id) {
     author: suggestion.author,
     recommender: suggestion.suggested_by,
     mood: "Surpresa",
+    genre: suggestion.genre,
+    pages: suggestion.pages,
     reason: suggestion.pitch,
     file_url: suggestion.file_url || null,
+    cover_url: suggestion.cover_url || null,
+    suggested_by_user: suggestion.created_by,
     created_by: auth.userId
   });
 
@@ -159,8 +397,11 @@ export async function promoteSuggestionToRecommendationAction(id) {
 
   if (error) return toActionError(error);
 
+  const { error: deleteError } = await auth.supabase.from("suggestions").delete().eq("id", id);
+  if (deleteError) return toActionError(deleteError);
+
   revalidateBookClubPages();
-  return { ok: true, message: "Sugestão enviada para o acervo." };
+  return { ok: true, message: "Sugestão enviada para o acervo e removida das sugestões." };
 }
 
 export async function deleteMemberAction(id) {
@@ -200,8 +441,7 @@ export async function drawBookAction(bookIds = []) {
   const { data, error } = await auth.supabase
     .from("recommendations")
     .select("id, title, author")
-    .in("id", selectedIds)
-    .eq("is_read", false);
+    .in("id", selectedIds);
 
   if (error) return toActionError(error);
   if (!data.length) return { ok: false, message: "Nenhum dos livros selecionados foi encontrado no acervo." };
@@ -214,15 +454,25 @@ export async function drawBookAction(bookIds = []) {
 
   if (finishError) return toActionError(finishError);
 
-  const { error: cycleError } = await auth.supabase.from("reading_cycles").insert({
-    recommendation_id: book.id,
-    book_title: book.title,
-    book_author: book.author,
-    status: "planning",
-    created_by: auth.userId
-  });
+  const { data: cycle, error: cycleError } = await auth.supabase
+    .from("reading_cycles")
+    .insert({
+      recommendation_id: book.id,
+      book_title: book.title,
+      book_author: book.author,
+      status: "planning",
+      created_by: auth.userId
+    })
+    .select("id")
+    .single();
 
   if (cycleError) return toActionError(cycleError);
+
+  const { error: participantsError } = await auth.supabase.rpc("add_all_profiles_to_reading_cycle", {
+    target_cycle_id: cycle.id
+  });
+
+  if (participantsError) return toActionError(participantsError);
 
   return await createHistory(auth, `Livro sorteado: ${book.title}, de ${book.author}. Regras da leitura pendentes.`);
 }
@@ -467,6 +717,84 @@ async function getAuthenticatedClient() {
 
 function toActionError(error) {
   return { ok: false, message: error.message || "Não foi possível concluir a ação." };
+}
+
+async function saveBookProgress(auth, { recommendationId, currentPage, isRead }) {
+  const { data: existingProgress, error: existingError } = await auth.supabase
+    .from("book_progress")
+    .select("id, current_page, started_at, finished_at")
+    .eq("recommendation_id", recommendationId)
+    .eq("user_id", auth.userId)
+    .maybeSingle();
+
+  if (existingError) return toActionError(existingError);
+
+  const now = new Date().toISOString();
+  const previousPage = existingProgress?.current_page ?? 0;
+  const startedAt = existingProgress?.started_at || (currentPage > 0 ? now : null);
+  const finishedAt = isRead ? existingProgress?.finished_at || now : null;
+  const { data: progress, error: progressError } = await auth.supabase
+    .from("book_progress")
+    .upsert(
+      {
+        recommendation_id: recommendationId,
+        user_id: auth.userId,
+        current_page: currentPage,
+        is_read: Boolean(isRead),
+        started_at: startedAt,
+        finished_at: finishedAt,
+        updated_at: now
+      },
+      { onConflict: "recommendation_id,user_id" }
+    )
+    .select("id")
+    .single();
+
+  if (progressError) return toActionError(progressError);
+
+  if (currentPage !== previousPage) {
+    const { error: eventError } = await auth.supabase.from("book_progress_events").insert({
+      progress_id: progress.id,
+      recommendation_id: recommendationId,
+      user_id: auth.userId,
+      previous_page: previousPage,
+      current_page: currentPage,
+      pages_delta: currentPage - previousPage
+    });
+
+    if (eventError) return toActionError(eventError);
+  }
+
+  return { ok: true };
+}
+
+async function awardProfilePoints(auth, points) {
+  const { data: profile, error: profileError } = await auth.supabase
+    .from("profiles")
+    .select("*")
+    .eq("id", auth.userId)
+    .maybeSingle();
+
+  if (profileError) return toActionError(profileError);
+
+  const { error } = await auth.supabase.from("profiles").upsert(
+    {
+      id: auth.userId,
+      display_name: profile?.display_name ?? "",
+      discord_handle: profile?.discord_handle ?? "",
+      favorite_genre: profile?.favorite_genre ?? "",
+      reading_style: profile?.reading_style ?? "",
+      bio: profile?.bio ?? "",
+      points: (profile?.points ?? 0) + points,
+      streak: profile?.streak ?? 0,
+      updated_at: new Date().toISOString()
+    },
+    { onConflict: "id" }
+  );
+
+  if (error) return toActionError(error);
+
+  return { ok: true };
 }
 
 async function validateDiscordHandle(supabase, discordHandle) {
