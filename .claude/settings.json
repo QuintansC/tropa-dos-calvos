@@ -10,7 +10,8 @@
       "Bash(\"node_modules/@esbuild/.win32-x64-1abGnUzx/esbuild.exe\" --loader=jsx --outfile=/dev/null)",
       "Bash(\"node_modules/@esbuild/.win32-x64-1abGnUzx/esbuild.exe\" --loader=jsx)",
       "Bash(ls -la src/assets/)",
-      "Bash(ls -la public)"
+      "Bash(ls -la public)",
+      "Bash(\"node_modules/@esbuild/.win32-x64-1abGnUzx/esbuild.exe\" --loader=js)"
     ]
   }
 }

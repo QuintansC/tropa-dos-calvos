@@ -1,5 +1,6 @@
 "use server";
 
+import { headers } from "next/headers";
 import { createClient } from "../lib/supabase/server.js";
 import { hasSupabaseConfig } from "../lib/supabase/config.js";
 
@@ -33,7 +34,7 @@ export async function signUpAction(formData) {
   if (error) return { ok: false, message: error };
 
   const supabase = await createClient();
-  const siteUrl = process.env.SITE_URL || "http://localhost:3000";
+  const siteUrl = await getSiteUrl();
   const { error: authError } = await supabase.auth.signUp({
     email,
     password,
@@ -61,6 +62,23 @@ export async function signOutAction() {
   const supabase = await createClient();
   await supabase.auth.signOut();
   return { ok: true, message: "Sessão encerrada.", redirectTo: "/login" };
+}
+
+async function getSiteUrl() {
+  const configured = (process.env.SITE_URL || process.env.NEXT_PUBLIC_SITE_URL || "").trim();
+  if (configured) return configured.replace(/\/$/, "");
+
+  const headerList = await headers();
+  const origin = headerList.get("origin");
+  if (origin) return origin.replace(/\/$/, "");
+
+  const forwardedHost = headerList.get("x-forwarded-host") || headerList.get("host");
+  if (forwardedHost) {
+    const forwardedProto = headerList.get("x-forwarded-proto") || "https";
+    return `${forwardedProto}://${forwardedHost}`;
+  }
+
+  return "http://localhost:3000";
 }
 
 function getCredentials(formData) {
