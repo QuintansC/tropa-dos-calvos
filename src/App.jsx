@@ -30,6 +30,7 @@ const emptyState = {
   cycles: [],
   profile: null,
   profiles: [],
+  discordHandles: [],
   leaderboard: [],
   checkins: [],
   activeParticipants: [],
@@ -77,6 +78,7 @@ export default function App({ initialState = emptyState, userEmail, page = "home
   const activeCycle = state.activeCycle;
   const profile = state.profile;
   const profiles = state.profiles;
+  const discordHandles = state.discordHandles;
   const leaderboard = state.leaderboard;
   const checkins = state.checkins;
   const activeParticipants = state.activeParticipants;
@@ -168,6 +170,7 @@ export default function App({ initialState = emptyState, userEmail, page = "home
     latestDraw,
     profile,
     profiles,
+    discordHandles,
     bookSearch,
     recommendations,
     saveProfile,
@@ -420,7 +423,9 @@ function RecommendationsPage({
   );
 }
 
-function SuggestionsPage({ isPending, sortedSuggestions, addSuggestion, runAction }) {
+function SuggestionsPage({ isPending, sortedSuggestions, addSuggestion, runAction, discordHandles = [] }) {
+  const hasDiscordHandles = discordHandles.length > 0;
+
   return (
     <section className="suggestion-section page-section" aria-labelledby="suggestions-title">
       <div className="section-shell split-layout reversed">
@@ -437,11 +442,30 @@ function SuggestionsPage({ isPending, sortedSuggestions, addSuggestion, runActio
             <Field label="Autor" name="author" required />
           </div>
           <div className="field-pair">
-            <Field label="Sugerido por" name="suggestedBy" autoComplete="name" required />
+            <label>
+              <span>Sugerido por</span>
+              <select name="suggestedBy" defaultValue="" required disabled={!hasDiscordHandles}>
+                <option value="" disabled>
+                  {hasDiscordHandles ? "Selecione o vulgo" : "Sem vulgos cadastrados"}
+                </option>
+                {discordHandles.map((handle) => (
+                  <option key={handle} value={handle}>
+                    {handle}
+                  </option>
+                ))}
+              </select>
+            </label>
             <Field label="Páginas" name="pages" type="number" min="1" max="2000" placeholder="320" />
           </div>
+          <Field
+            label="Link do Google Drive"
+            name="fileUrl"
+            type="url"
+            inputMode="url"
+            placeholder="https://drive.google.com/..."
+          />
           <Textarea label="Defesa da indicação" name="pitch" rows="4" required />
-          <button className="button button-primary" type="submit" disabled={isPending}>
+          <button className="button button-primary" type="submit" disabled={isPending || !hasDiscordHandles}>
             Adicionar sugestão
           </button>
         </form>
@@ -529,113 +553,79 @@ function DrawPage({
 
   return (
     <section className="draw-section page-section" aria-labelledby="draw-title">
-      <div className="section-shell draw-grid">
+      <div className="section-shell draw-layout">
         <SectionHeading
           kicker="Sorteios"
           title="Escolha o livro da próxima leitura"
-          copy="Selecione os livros não lidos do acervo. Depois do sorteio, o grupo define data de início, encontros, metas e lembretes."
+          copy="Monte a lista com os livros não lidos do acervo e gire o sorteio. Depois o grupo define data de início, encontros, metas e lembretes."
           id="draw-title"
         />
 
-        <div className="panel draw-panel">
-          <div className="draw-status-grid">
-            <SummaryStat label="Elegíveis" value={availableBooks.length} />
-            <SummaryStat label="Selecionados" value={selectedCount} />
-            <SummaryStat label="Já lidos" value={readBooks.length} />
-          </div>
-          <div className="draw-actions">
-            <button
-              className="button button-primary"
-              type="button"
-              disabled={isPending || !selectedCount}
-              onClick={() => runAction(() => drawBookAction(selectedDrawBookIds))}
-            >
-              Sortear livro ({selectedCount})
-            </button>
-            <button
-              className="button button-secondary"
-              type="button"
-              disabled={!activeCycle}
-              onClick={() => setIsRoutineModalOpen(true)}
-            >
-              Editar rotina
-            </button>
-          </div>
-          <div className="draw-result" aria-live="polite">
-            <span>Resultado</span>
-            <strong>{latestDraw?.label || "Nenhum sorteio realizado"}</strong>
-          </div>
-          {activeCycle ? (
-            <div className="cycle-summary">
-              <span className="summary-label">Rodada ativa</span>
-              <strong>{activeCycle.bookTitle}</strong>
-              <p>{cycleConfigured ? getCycleRulesSummary(activeCycle) : "Aguardando o grupo definir início, encontros e metas."}</p>
-            </div>
-          ) : null}
-          <div className="history-list" aria-label="Histórico de sorteios">
-            {history.length ? (
-              history.map((item) => <span key={item.id}>{item.label}</span>)
-            ) : (
-              <span>Nenhum histórico registrado.</span>
-            )}
-          </div>
-        </div>
-
-        {activeCycle ? (
-          <div className="panel volunteer-panel">
-            <div>
-              <span className="summary-label">Participação voluntária</span>
-              <h3>{activeParticipants.length} leitor(es) dentro</h3>
-              <p>Entra na leitura quem quiser acompanhar esse livro. Não existe cadastro manual de participantes.</p>
-            </div>
-            <button
-              className={currentUserParticipates ? "button button-danger" : "button button-secondary"}
-              type="button"
-              disabled={isPending}
-              onClick={currentUserParticipates ? leaveReadingCycle : joinReadingCycle}
-            >
-              {currentUserParticipates ? "Sair da leitura" : "Entrar na leitura"}
-            </button>
-            <div className="volunteer-list">
-              {activeParticipants.length ? (
-                activeParticipants.map((participant) => (
-                  <span className="member-chip" key={participant.id || participant.discordHandle}>
-                    {participant.displayName || participant.discordHandle || "Leitor da tropa"}
+        <div className="draw-hero" aria-live="polite">
+          <div className="draw-hero-main">
+            <span className="draw-hero-kicker">Resultado do sorteio</span>
+            <p className="draw-hero-result">
+              {latestDraw?.label || "Nenhum sorteio realizado ainda"}
+            </p>
+            <div className="draw-hero-status">
+              {activeCycle ? (
+                <>
+                  <span>
+                    Rodada ativa: <strong>{activeCycle.bookTitle}</strong>
+                    {" — "}
+                    {cycleConfigured
+                      ? getCycleRulesSummary(activeCycle)
+                      : "aguardando o grupo definir início, encontros e metas."}
                   </span>
-                ))
+                  <button
+                    className="button button-ghost"
+                    type="button"
+                    onClick={() => setIsRoutineModalOpen(true)}
+                  >
+                    Editar rotina
+                  </button>
+                </>
               ) : (
-                <EmptyState message="Ninguém entrou voluntariamente nessa leitura ainda." />
+                <span>Monte a lista ao lado e gire o sorteio para abrir uma nova rodada.</span>
               )}
             </div>
           </div>
-        ) : null}
-
-        <div className="panel draw-books-panel">
-          <div className="draw-books-header">
-            <div>
-              <span className="summary-label">Livros participantes</span>
-              <strong>{selectedCount} selecionados</strong>
-            </div>
-            <div className="draw-books-actions">
-              <button
-                className="button button-danger"
-                type="button"
-                disabled={isPending || !availableBooks.length}
-                onClick={() => setSelectedDrawBookIds([])}
-              >
-                Limpar
-              </button>
-              <button
-                className="button button-secondary"
-                type="button"
-                disabled={isPending || !availableBooks.length}
-                onClick={() => setSelectedDrawBookIds(availableBooks.map((book) => book.id))}
-              >
-                Todos não lidos
-              </button>
-            </div>
+          <div className="draw-hero-stats">
+            <HeroStat value={availableBooks.length} label="elegíveis" />
+            <HeroStat value={selectedCount} label="selecionados" />
+            <HeroStat value={readBooks.length} label="já lidos" />
           </div>
-          <div className="draw-selection-grid">
+        </div>
+
+        <div className="draw-workspace">
+          <div className="panel pick-panel">
+            <div className="pick-head">
+              <div>
+                <span className="summary-label">Livros participantes</span>
+                <strong>
+                  {selectedCount} de {availableBooks.length} elegíveis
+                </strong>
+              </div>
+              <div className="pick-head-actions">
+                <button
+                  className="button button-secondary"
+                  type="button"
+                  disabled={isPending || !availableBooks.length}
+                  onClick={() => setSelectedDrawBookIds(availableBooks.map((book) => book.id))}
+                >
+                  Todos não lidos
+                </button>
+                <button
+                  className="button button-danger"
+                  type="button"
+                  disabled={isPending || !selectedCount}
+                  onClick={() => setSelectedDrawBookIds([])}
+                >
+                  Limpar
+                </button>
+              </div>
+            </div>
+
             <label className="search-field">
               <span>Buscar livros elegíveis</span>
               <input
@@ -645,6 +635,7 @@ function DrawPage({
                 onChange={(event) => setDrawBookSearch(event.target.value)}
               />
             </label>
+
             <div className="selected-books-box">
               <span className="summary-label">Entram no sorteio</span>
               {selectedBooks.length ? (
@@ -655,51 +646,114 @@ function DrawPage({
                       type="button"
                       key={book.id}
                       onClick={() => toggleDrawBook(book.id)}
+                      aria-label={`Remover ${book.title} do sorteio`}
                     >
                       {book.title}
+                      <span aria-hidden="true">×</span>
                     </button>
                   ))}
                 </div>
               ) : (
-                <small>Nenhum livro selecionado.</small>
+                <small>Nenhum livro selecionado ainda.</small>
               )}
+            </div>
+
+            <div className="pick-list" aria-live="polite">
+              {recommendations.length ? (
+                <>
+                  {visibleAvailableBooks.map((book) => (
+                    <label
+                      className={`draw-book-option${
+                        selectedDrawBookIds.includes(book.id) ? " is-selected" : ""
+                      }`}
+                      key={book.id}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedDrawBookIds.includes(book.id)}
+                        disabled={isPending}
+                        onChange={() => toggleDrawBook(book.id)}
+                      />
+                      <span>
+                        <strong>{book.title}</strong>
+                        <small>{book.author} · indicado por {book.recommender}</small>
+                      </span>
+                    </label>
+                  ))}
+                  {availableBooks.length && !visibleAvailableBooks.length ? (
+                    <EmptyState message="Nenhum livro elegível encontrado nessa busca." />
+                  ) : null}
+                  {readBooks.map((book) => (
+                    <div className="draw-book-option is-read" key={book.id}>
+                      <input type="checkbox" disabled />
+                      <span>
+                        <strong>{book.title}</strong>
+                        <small>{book.author} · já lido</small>
+                      </span>
+                    </div>
+                  ))}
+                </>
+              ) : (
+                <EmptyState message="Adicione livros ao acervo antes de montar o sorteio." />
+              )}
+            </div>
+
+            <div className="pick-cta">
+              <button
+                className="button button-primary"
+                type="button"
+                disabled={isPending || !selectedCount}
+                onClick={() => runAction(() => drawBookAction(selectedDrawBookIds))}
+              >
+                Sortear livro ({selectedCount})
+              </button>
+              <small>
+                O sorteio escolhe um título aleatório entre os selecionados e abre a rodada.
+              </small>
             </div>
           </div>
 
-          <div className="draw-book-list" aria-live="polite">
-            {recommendations.length ? (
-              <>
-                {visibleAvailableBooks.map((book) => (
-                  <label className="draw-book-option" key={book.id}>
-                    <input
-                      type="checkbox"
-                      checked={selectedDrawBookIds.includes(book.id)}
-                      disabled={isPending}
-                      onChange={() => toggleDrawBook(book.id)}
-                    />
-                    <span>
-                      <strong>{book.title}</strong>
-                      <small>{book.author} · indicado por {book.recommender}</small>
-                    </span>
-                  </label>
-                ))}
-                {availableBooks.length && !visibleAvailableBooks.length ? (
-                  <EmptyState message="Nenhum livro elegível encontrado nessa busca." />
-                ) : null}
-                {readBooks.map((book) => (
-                  <div className="draw-book-option is-read" key={book.id}>
-                    <input type="checkbox" disabled />
-                    <span>
-                      <strong>{book.title}</strong>
-                      <small>{book.author} · já lido</small>
-                    </span>
-                  </div>
-                ))}
-              </>
-            ) : (
-              <EmptyState message="Adicione livros ao acervo antes de montar o sorteio." />
-            )}
-          </div>
+          <aside className="draw-rail">
+            {activeCycle ? (
+              <div className="panel rail-card volunteer-card">
+                <div>
+                  <span className="summary-label">Participação voluntária</span>
+                  <h3>{activeParticipants.length} leitor(es) dentro</h3>
+                  <p>Entra na leitura quem quiser acompanhar esse livro.</p>
+                </div>
+                <button
+                  className={currentUserParticipates ? "button button-danger" : "button button-primary"}
+                  type="button"
+                  disabled={isPending}
+                  onClick={currentUserParticipates ? leaveReadingCycle : joinReadingCycle}
+                >
+                  {currentUserParticipates ? "Sair da leitura" : "Entrar na leitura"}
+                </button>
+                <div className="volunteer-list">
+                  {activeParticipants.length ? (
+                    activeParticipants.map((participant) => (
+                      <span className="member-chip" key={participant.id || participant.discordHandle}>
+                        {participant.displayName || participant.discordHandle || "Leitor da tropa"}
+                      </span>
+                    ))
+                  ) : (
+                    <EmptyState message="Ninguém entrou voluntariamente ainda." />
+                  )}
+                </div>
+              </div>
+            ) : null}
+
+            <div className="panel rail-card history-card">
+              <span className="summary-label">Histórico de sorteios</span>
+              <div className="history-list" aria-label="Histórico de sorteios">
+                {history.length ? (
+                  history.map((item) => <span key={item.id}>{item.label}</span>)
+                ) : (
+                  <span className="history-empty">Nenhum sorteio registrado ainda.</span>
+                )}
+              </div>
+            </div>
+          </aside>
         </div>
       </div>
       {isRoutineModalOpen && activeCycle ? (
@@ -955,6 +1009,15 @@ function Stat({ value, label }) {
   );
 }
 
+function HeroStat({ value, label }) {
+  return (
+    <div className="draw-hero-stat">
+      <span>{value}</span>
+      <small>{label}</small>
+    </div>
+  );
+}
+
 function SummaryItem({ label, value }) {
   return (
     <div className="reading-summary">
@@ -1026,6 +1089,11 @@ function RecommendationCard({ book, disabled, onRemove, onToggleRead }) {
       </header>
       <p>{book.reason}</p>
       <div className="card-actions">
+        {book.fileUrl ? (
+          <a className="button button-secondary" href={book.fileUrl} target="_blank" rel="noreferrer">
+            Abrir arquivo
+          </a>
+        ) : null}
         <button className="button button-secondary" type="button" disabled={disabled} onClick={onToggleRead}>
           {book.isRead ? "Marcar não lido" : "Marcar lido"}
         </button>
@@ -1048,6 +1116,11 @@ function SuggestionItem({ suggestion, disabled, onPromote, onVote, onRemove }) {
           {suggestion.author} · {pages}sugerido por {suggestion.suggestedBy}
         </span>
         <p>{suggestion.pitch}</p>
+        {suggestion.fileUrl ? (
+          <a className="file-link" href={suggestion.fileUrl} target="_blank" rel="noreferrer">
+            Abrir arquivo
+          </a>
+        ) : null}
       </header>
       <div className="vote-box">
         <span className="vote-count">{suggestion.votes}</span>
@@ -1116,6 +1189,7 @@ function normalizeState(state) {
     cycles: state?.cycles ?? [],
     profile: state?.profile ?? null,
     profiles: state?.profiles ?? [],
+    discordHandles: state?.discordHandles ?? [],
     leaderboard: state?.leaderboard ?? [],
     checkins: state?.checkins ?? [],
     activeParticipants: state?.activeParticipants ?? [],

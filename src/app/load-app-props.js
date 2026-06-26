@@ -35,6 +35,7 @@ async function getBookClubStateOrSetupState(supabase, userId) {
         cycles: [],
         profile: null,
         profiles: [],
+        discordHandles: [],
         leaderboard: [],
         checkins: [],
         activeParticipants: [],
@@ -50,5 +51,9 @@ async function getBookClubStateOrSetupState(supabase, userId) {
 
 function isMissingSchemaError(error) {
   const message = error instanceof Error ? error.message : String(error);
-  return message.includes("Could not find the table") || message.includes("schema cache");
+  return (
+    message.includes("Could not find the table") ||
+    message.includes("Could not find the function") ||
+    message.includes("schema cache")
+  );
 }

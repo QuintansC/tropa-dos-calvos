@@ -8,12 +8,16 @@ export async function createRecommendationAction(formData) {
   const auth = await getAuthenticatedClient();
   if (!auth.ok) return auth;
 
+  const fileUrl = normalizeExternalUrl(formData.get("fileUrl"));
+  if (fileUrl === false) return { ok: false, message: "Informe um link externo valido para o arquivo." };
+
   const payload = {
     title: clean(formData.get("title")),
     author: clean(formData.get("author")),
     recommender: clean(formData.get("recommender")),
     mood: clean(formData.get("mood")),
     reason: clean(formData.get("reason")),
+    file_url: fileUrl,
     created_by: auth.userId
   };
 
@@ -33,11 +37,15 @@ export async function createSuggestionAction(formData) {
   if (!auth.ok) return auth;
 
   const pages = Number(formData.get("pages"));
+  const fileUrl = normalizeExternalUrl(formData.get("fileUrl"));
+  if (fileUrl === false) return { ok: false, message: "Informe um link externo valido para o arquivo." };
+
   const payload = {
     title: clean(formData.get("title")),
     author: clean(formData.get("author")),
     suggested_by: clean(formData.get("suggestedBy")),
     pages: Number.isFinite(pages) && pages > 0 ? pages : null,
+    file_url: fileUrl,
     pitch: clean(formData.get("pitch")),
     votes: 1,
     created_by: auth.userId
@@ -45,6 +53,12 @@ export async function createSuggestionAction(formData) {
 
   if (!payload.title || !payload.author || !payload.suggested_by || !payload.pitch) {
     return { ok: false, message: "Preencha os campos da sugestão." };
+  }
+
+  const selectedHandle = await validateDiscordHandle(auth.supabase, payload.suggested_by);
+  if (!selectedHandle.ok) return selectedHandle;
+  if (!selectedHandle.exists) {
+    return { ok: false, message: "Selecione um vulgo do Discord cadastrado na plataforma." };
   }
 
   const { error } = await auth.supabase.from("suggestions").insert(payload);
@@ -122,7 +136,7 @@ export async function promoteSuggestionToRecommendationAction(id) {
 
   const { data: suggestion, error: suggestionError } = await auth.supabase
     .from("suggestions")
-    .select("title, author, suggested_by, pitch")
+    .select("title, author, suggested_by, pitch, file_url")
     .eq("id", id)
     .maybeSingle();
 
@@ -135,6 +149,7 @@ export async function promoteSuggestionToRecommendationAction(id) {
     recommender: suggestion.suggested_by,
     mood: "Surpresa",
     reason: suggestion.pitch,
+    file_url: suggestion.file_url || null,
     created_by: auth.userId
   });
 
@@ -454,8 +469,30 @@ function toActionError(error) {
   return { ok: false, message: error.message || "Não foi possível concluir a ação." };
 }
 
+async function validateDiscordHandle(supabase, discordHandle) {
+  const { data, error } = await supabase.rpc("has_profile_discord_handle", {
+    target_handle: discordHandle
+  });
+
+  if (error) return toActionError(error);
+
+  return { ok: true, exists: Boolean(data) };
+}
+
 function clean(value) {
   return String(value || "").trim();
+}
+
+function normalizeExternalUrl(value) {
+  const rawUrl = clean(value);
+  if (!rawUrl) return null;
+
+  try {
+    const url = new URL(rawUrl);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : false;
+  } catch {
+    return false;
+  }
 }
 
 function getSelectedBookIds(input) {

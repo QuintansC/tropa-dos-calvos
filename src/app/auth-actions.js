@@ -33,7 +33,7 @@ export async function signUpAction(formData) {
   if (error) return { ok: false, message: error };
 
   const supabase = await createClient();
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+  const siteUrl = process.env.SITE_URL || "http://localhost:3000";
   const { error: authError } = await supabase.auth.signUp({
     email,
     password,

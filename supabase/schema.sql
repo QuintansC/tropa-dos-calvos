@@ -7,12 +7,14 @@ create table if not exists public.recommendations (
   recommender text not null,
   mood text not null check (mood in ('Debate forte', 'Leitura leve', 'Clássico', 'Surpresa')),
   reason text not null,
+  file_url text,
   is_read boolean not null default false,
   created_by uuid not null default auth.uid() references auth.users(id) on delete cascade,
   created_at timestamptz not null default now()
 );
 
 alter table public.recommendations
+add column if not exists file_url text,
 add column if not exists is_read boolean not null default false;
 
 create table if not exists public.suggestions (
@@ -21,11 +23,15 @@ create table if not exists public.suggestions (
   author text not null,
   suggested_by text not null,
   pages integer check (pages is null or pages > 0),
+  file_url text,
   pitch text not null,
   votes integer not null default 1 check (votes >= 0),
   created_by uuid not null default auth.uid() references auth.users(id) on delete cascade,
   created_at timestamptz not null default now()
 );
+
+alter table public.suggestions
+add column if not exists file_url text;
 
 create table if not exists public.members (
   id uuid primary key default gen_random_uuid(),
@@ -113,6 +119,20 @@ on public.recommendations (title, author);
 
 create unique index if not exists suggestions_title_author_unique
 on public.suggestions (title, author);
+
+alter table public.recommendations
+drop constraint if exists recommendations_file_url_http_check;
+
+alter table public.recommendations
+add constraint recommendations_file_url_http_check
+check (file_url is null or file_url ~* '^https?://');
+
+alter table public.suggestions
+drop constraint if exists suggestions_file_url_http_check;
+
+alter table public.suggestions
+add constraint suggestions_file_url_http_check
+check (file_url is null or file_url ~* '^https?://');
 
 alter table public.recommendations enable row level security;
 alter table public.suggestions enable row level security;
@@ -220,13 +240,14 @@ to authenticated
 with check (created_by = auth.uid());
 
 drop policy if exists "authenticated read profiles" on public.profiles;
+drop policy if exists "authenticated read own profile" on public.profiles;
 drop policy if exists "authenticated insert own profile" on public.profiles;
 drop policy if exists "authenticated update own profile" on public.profiles;
 
-create policy "authenticated read profiles"
+create policy "authenticated read own profile"
 on public.profiles for select
 to authenticated
-using (true);
+using (id = auth.uid());
 
 create policy "authenticated insert own profile"
 on public.profiles for insert
@@ -290,6 +311,69 @@ create policy "authenticated delete own reading participants"
 on public.reading_participants for delete
 to authenticated
 using (user_id = auth.uid());
+
+drop function if exists public.get_public_profile_summaries();
+
+create function public.get_public_profile_summaries()
+returns table (
+  id uuid,
+  display_name text,
+  discord_handle text,
+  points integer
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    profiles.id,
+    profiles.display_name,
+    profiles.discord_handle,
+    profiles.points
+  from public.profiles
+  order by profiles.display_name asc, profiles.discord_handle asc;
+$$;
+
+revoke all on function public.get_public_profile_summaries() from public, anon, authenticated;
+grant execute on function public.get_public_profile_summaries() to authenticated;
+
+drop function if exists public.get_profile_discord_handles();
+
+create function public.get_profile_discord_handles()
+returns table (discord_handle text)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select distinct profiles.discord_handle
+  from public.profiles
+  where nullif(trim(profiles.discord_handle), '') is not null
+  order by profiles.discord_handle asc;
+$$;
+
+revoke all on function public.get_profile_discord_handles() from public, anon, authenticated;
+grant execute on function public.get_profile_discord_handles() to authenticated;
+
+drop function if exists public.has_profile_discord_handle(text);
+
+create function public.has_profile_discord_handle(target_handle text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.profiles
+    where profiles.discord_handle = trim(coalesce(target_handle, ''))
+  );
+$$;
+
+revoke all on function public.has_profile_discord_handle(text) from public, anon, authenticated;
+grant execute on function public.has_profile_discord_handle(text) to authenticated;
 
 create or replace function public.increment_suggestion_vote(target_id uuid)
 returns void

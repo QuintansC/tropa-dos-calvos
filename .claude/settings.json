@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e \"require\\('fs'\\).readFileSync\\('src/App.jsx','utf8'\\); console.log\\('read ok'\\)\")"
+    ]
+  }
+}
