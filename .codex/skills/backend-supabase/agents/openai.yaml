@@ -1,0 +1,4 @@
+interface:
+  display_name: "Backend Supabase"
+  short_description: "Backend com Supabase e RLS"
+  default_prompt: "Use $backend-supabase to build a Supabase-backed web app feature."

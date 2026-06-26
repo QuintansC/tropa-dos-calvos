@@ -1,0 +1,4 @@
+interface:
+  display_name: "Backend Express Prisma"
+  short_description: "Backend Node limpo com Express e Prisma"
+  default_prompt: "Use $backend-express-prisma to build a clean Express and Prisma backend module."
